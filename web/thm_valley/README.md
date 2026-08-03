@@ -130,7 +130,7 @@ loginButton.addEventListener("click", (e) => {
     const username = loginForm.username.value;
     const password = loginForm.password.value;
 
-    if (username === "siemDev" && password === "california") {
+    if (username === "sie****" && password === "cal*****") {
         window.location.href = "/dev1243224123123/devNotes37370.txt";
     } else {
         loginErrorMsg.style.opacity = 1;
@@ -173,7 +173,7 @@ Inside `siemHTTP2.pcapng`, one packet stood out: a `POST /index.html` request wi
 
 ```
 Form item: "uname" = "valleyDev"
-Form item: "psw"   = "ph0t0s1234"
+Form item: "psw"   = "ph0******"
 Form item: "remember" = "on"
 ```
 
@@ -185,7 +185,7 @@ Form item: "remember" = "on"
 
 ```bash
 ssh valleyDev@10.128.176.159
-Password: ph0t0s1234
+Password: ph0*****
 ```
 
 Logged in successfully. Confirmed access with `ls -la`:
@@ -214,9 +214,9 @@ Rather than trying to crack this locally with a limited wordlist (time-consuming
 
 **Result:**
 ```
-Hash: e6722920bab2326f8217e4
+Hash: e67*********
 Type: MD5
-Result: liberty123
+Result: l*****
 ```
 
 ---
