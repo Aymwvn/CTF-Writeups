@@ -24,9 +24,6 @@
 | **Format** | Guided walkthrough (not a blind challenge) |
 | **Tool** | Volatility 3 |
 | **Date Completed** | August 2026 |
-
-> ⚠️ **Note on format:** unlike my Valley writeup, this was a **guided learning room**, not an unguided box. I'm documenting it honestly as that — the value here isn't "I discovered this myself," it's "here's a new forensic toolset and methodology I now understand and can apply." I've also **redacted every graded answer** (`▓▓▓▓▓▓▓▓`) since posting solved room answers publicly isn't something I want to do — what matters for this writeup is the *method*, not the answer key.
-
 ---
 
 ## 🧩 What This Room Actually Teaches (in plain terms)
