@@ -339,5 +339,5 @@ proc.interactive()
 
 - [Pwntools Documentation](https://docs.pwntools.com/)
 - [GDB + pwndbg](https://github.com/pwndbg/pwndbg)
-- [Buffer Overflows Made Easy — TCM Security (YouTube Playlist)](https://www.youtube.com/playlist?list=PLhixgUqwRTjxglIswKp9mpkfPNfHkzyeN)
+- [Binary Exploitation / Memory Corruption by LiveOverflow (YouTube Playlist)](https://www.youtube.com/playlist?list=PLhixgUqwRTjxglIswKp9mpkfPNfHkzyeN)
 - [x86 NOP Sled — Wikipedia](https://en.wikipedia.org/wiki/NOP_slide)
