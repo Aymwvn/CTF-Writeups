@@ -73,7 +73,7 @@ That single field is the pivot for the entire rest of the room: `OWoodflint` bec
 
 ### 3. Username → X (Twitter) Profile
 
-Searching the `OWoodflint` handle directly (rather than reverse-image-searching the photo) leads straight to the matching X profile, using the same cat photo as its avatar — confirming this is the same person.
+Searching the `OWoodflint` handle directly leads straight to the matching X profile, using the same cat photo as its avatar — confirming this is the same person.
 
 ![X profile with avatar and bio](screenshots/01_x_profile_avatar_bio.png)
 
