@@ -45,7 +45,7 @@ A crowdsourced global database of wireless access points, built from years of "w
 Browsers render a page based on CSS, and CSS can hide text without removing it from the underlying HTML — e.g., `color:#ffffff` on a white background makes text invisible to the eye but still fully present and selectable/searchable in the raw HTML. `Ctrl+U` (or `view-source:`) shows the actual document the browser received, bypassing whatever styling is hiding content. This is a classic OSINT/CTF trick: hide a flag or password in plain sight using white-on-white text.
 
 **Metadata / EXIF**
-Image files (especially JPEGs) carry embedded metadata beyond the visible pixels: camera model, timestamp, software used to edit it, sometimes GPS coordinates, and any custom fields the creator set — like a `copyright` tag. This is *always* the first move on an OSINT image challenge, before any reverse image search. Tools like `exiftool` (CLI) or web front-ends like [metadata2go.com](https://www.metadata2go.com/) parse the file's EXIF/XMP headers and dump every field in human-readable form. People rarely think to strip this before uploading an image, which makes it one of the highest-value, lowest-effort OSINT pivots available — in this room it's what cracked the case open before reverse image search was even needed.
+Image files (especially JPEGs) carry embedded metadata beyond the visible pixels: camera model, timestamp, software used to edit it, sometimes GPS coordinates, and any custom fields the creator set — like a `copyright` tag. This is *always* the first move on an OSINT image challenge, before any reverse image search. `exiftool` (CLI, by Phil Harvey) is the standard tool for this — point it at a file and it dumps every EXIF/XMP/IPTC field in human-readable form. People rarely think to strip this before uploading an image, which makes it one of the highest-value, lowest-effort OSINT pivots available — in this room it's what cracked the case open before reverse image search was even needed.
 
 ## Walkthrough
 
@@ -55,13 +55,17 @@ The room gives you one file: a JPEG image. The stated goal is to see how far a s
 
 ### 2. EXIF Metadata → GPS Coordinates and Username
 
-Running the image through an EXIF parser (`exiftool`, or the web-based [metadata2go.com](https://www.metadata2go.com/) used here) dumps every metadata field baked into the file:
+Running `exiftool` against the starting image dumps every metadata field baked into the file:
 
-![EXIF metadata extraction](screenshots/00b_exif_metadata_extraction.png)
+```bash
+$ exiftool WindowsXP_1551719014755.jpg
+```
+
+![exiftool metadata extraction](screenshots/00b_exiftool_metadata_extraction.png)
 
 Two fields matter immediately:
-- **`gps_latitude` / `gps_longitude`:** `54°17'41.27"N`, `2°15'1.33"W` — a precise real-world coordinate pair, embedded automatically by whatever device captured the original photo.
-- **`copyright`:** `OWoodflint` — the photographer tagged their own username directly in the file's metadata.
+- **`GPS Latitude` / `GPS Longitude`:** `54°17'41.27" N`, `2°15'1.33" W` — a precise real-world coordinate pair, embedded automatically by whatever device captured the original photo.
+- **`Copyright`:** `OWoodflint` — the photographer tagged their own username directly in the file's metadata.
 
 That single field is the pivot for the entire rest of the room: `OWoodflint` becomes the identity to search everywhere else.
 
@@ -180,7 +184,7 @@ This room is less about any single "trick" and more about **discipline in pivoti
 
 Three techniques worth internalizing for future OSINT work or recon phases of a pentest:
 
-1. **Always check metadata first.** Before reverse image search, before manual digging — pull the EXIF/XMP headers with `exiftool` or a web parser. It's the cheapest possible move and, as this room proves, it can hand you the entire pivot chain's starting point in one step (here, a `copyright` field that was literally the target's username).
+1. **Always check metadata first.** Before reverse image search, before manual digging — pull the EXIF/XMP headers with `exiftool`. It's the cheapest possible move and, as this room proves, it can hand you the entire pivot chain's starting point in one command (here, a `Copyright` field that was literally the target's username).
 2. **BSSIDs are geolocation leaks.** Unlike an SSID, a BSSID (MAC address) is tied to physical hardware and gets logged passively by wardriving databases like WiGLE regardless of the owner's privacy settings. Never publish one attached to your identity.
 3. **"Hidden" isn't hidden from crawlers.** CSS-based hiding (`color` matching background, `display:none`, etc.) only hides content from a human glancing at the rendered page. Search engine crawlers and `view-source` both see the raw HTML. If something shouldn't be public, it needs to not be in the document at all — not just styled invisible.
 
@@ -194,6 +198,5 @@ More generally: this is the same methodology used in real recon/OSINT-gathering 
 
 - [TryHackMe — OhSINT](https://tryhackme.com/room/ohsint)
 - [ExifTool by Phil Harvey](https://exiftool.org/) — the standard CLI tool for reading/writing image metadata
-- [metadata2go.com](https://www.metadata2go.com/) — web-based EXIF/metadata viewer, no install required
 - [WiGLE.net](https://wigle.net/) — wardriving/wireless network database
 - [Google Advanced Search Operators — Google Support](https://support.google.com/websearch/answer/2466433)
