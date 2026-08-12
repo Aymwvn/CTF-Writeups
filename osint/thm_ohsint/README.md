@@ -44,28 +44,41 @@ A crowdsourced global database of wireless access points, built from years of "w
 **View-Source / Hidden HTML Content**
 Browsers render a page based on CSS, and CSS can hide text without removing it from the underlying HTML — e.g., `color:#ffffff` on a white background makes text invisible to the eye but still fully present and selectable/searchable in the raw HTML. `Ctrl+U` (or `view-source:`) shows the actual document the browser received, bypassing whatever styling is hiding content. This is a classic OSINT/CTF trick: hide a flag or password in plain sight using white-on-white text.
 
-**Metadata / EXIF (context, not directly used in this run)**
-Image files can carry embedded metadata (camera model, timestamp, and sometimes GPS coordinates) readable with tools like `exiftool`. It's the classic first move on an OSINT image challenge, worth keeping in your toolkit even when — as in this run — the pivot chain ended up running through the bio text and repo data instead.
+**Metadata / EXIF**
+Image files (especially JPEGs) carry embedded metadata beyond the visible pixels: camera model, timestamp, software used to edit it, sometimes GPS coordinates, and any custom fields the creator set — like a `copyright` tag. This is *always* the first move on an OSINT image challenge, before any reverse image search. Tools like `exiftool` (CLI) or web front-ends like [metadata2go.com](https://www.metadata2go.com/) parse the file's EXIF/XMP headers and dump every field in human-readable form. People rarely think to strip this before uploading an image, which makes it one of the highest-value, lowest-effort OSINT pivots available — in this room it's what cracked the case open before reverse image search was even needed.
 
 ## Walkthrough
 
 ### 1. Starting Point — The Profile Picture
 
-The room gives you one file: an avatar image. The stated goal is to see how far a single image can take you through nothing but public information.
+The room gives you one file: a JPEG image. The stated goal is to see how far a single image can take you through nothing but public information. Before touching a search engine, the first move on any image-based OSINT task is checking what's embedded *inside* the file itself.
 
-### 2. Reverse Image Search → X (Twitter) Profile
+### 2. EXIF Metadata → GPS Coordinates and Username
 
-Running the avatar through reverse image search surfaces an X profile using the same cat photo as its avatar.
+Running the image through an EXIF parser (`exiftool`, or the web-based [metadata2go.com](https://www.metadata2go.com/) used here) dumps every metadata field baked into the file:
+
+![EXIF metadata extraction](screenshots/00b_exif_metadata_extraction.png)
+
+Two fields matter immediately:
+- **`gps_latitude` / `gps_longitude`:** `54°17'41.27"N`, `2°15'1.33"W` — a precise real-world coordinate pair, embedded automatically by whatever device captured the original photo.
+- **`copyright`:** `OWoodflint` — the photographer tagged their own username directly in the file's metadata.
+
+That single field is the pivot for the entire rest of the room: `OWoodflint` becomes the identity to search everywhere else.
+
+**Why this works:** most people never check (or strip) EXIF/XMP metadata before uploading a photo. Cameras and phones write GPS, timestamps, and device info by default, and some tools — or careless self-tagging, like a copyright field — leak identity directly. Checking metadata costs nothing and should always come before spending time on reverse image search or manual digging.
+
+### 3. Username → X (Twitter) Profile
+
+Searching the `OWoodflint` handle directly (rather than reverse-image-searching the photo) leads straight to the matching X profile, using the same cat photo as its avatar — confirming this is the same person.
 
 ![X profile with avatar and bio](screenshots/01_x_profile_avatar_bio.png)
 
-- **Username:** `@OWoodflint`
 - **Avatar subject:** a cat (answers *"What is this user's avatar of?"*)
 - **Bio:** "I like taking photos and open source projects." — a small detail, but it foreshadows both the WordPress blog and the GitHub repo found later.
 
-**Why this works:** people constantly reuse the same profile picture across platforms out of convenience. One image search turns an anonymous handle into a cross-platform identity anchor.
+**Why this works:** once EXIF handed over a clean, likely-unique username, cross-platform correlation is just a matter of searching that handle everywhere — no visual matching required.
 
-### 3. Following the Username — WordPress Blog
+### 4. Following the Username — WordPress Blog
 
 Pivoting on the bio/username surfaces a personal WordPress blog belonging to the same person.
 
@@ -77,7 +90,7 @@ The single post reads:
 
 This directly answers *"Where has he gone on holiday?" → **New York***. Note this is presented as a real-time status update, not a permanent home — an important distinction the room is testing you on (don't confuse "currently in" with "lives in").
 
-### 4. Google Dorking to Clean Up the Search
+### 5. Google Dorking to Clean Up the Search
 
 At this point the target's username was common enough that a plain search buried real leads under other people's TryHackMe writeups. Running:
 
@@ -91,7 +104,7 @@ filters those out and surfaces the actual source pages: a personal site (`owoodf
 
 **Why this matters as a habit:** once your target has any public footprint tied to a CTF room (or a real investigation with noisy search results), a two-second `-exclude` saves you from wading through irrelevant pages.
 
-### 5. GitHub Repository → City and Email
+### 6. GitHub Repository → City and Email
 
 The `people_finder` repo is where the identity really opens up.
 
@@ -101,7 +114,7 @@ From the README:
 - "Hi all, **I am from London**..." → answers *"What city is this person in?" → **London***
 - "Project starting soon! Email me if you want to help out: **OWoodflint@gmail.com**" → answers *"What is his personal email address?"* and *"What site did you find his email address on?" → **GitHub***
 
-### 6. Back to X — The WiFi Tweet
+### 7. Back to X — The WiFi Tweet
 
 Scrolling the full X profile (past the "Hello world!" first post) surfaces a second tweet that's the whole reason WiGLE gets involved:
 
@@ -112,7 +125,7 @@ Scrolling the full X profile (past the "Hello world!" first post) surfaces a sec
 
 Posting your home router's BSSID publicly is the single biggest OPSEC mistake in this whole chain — it's a unique physical-hardware identifier, and unlike an SSID (which anyone can rename), it can't be casually changed.
 
-### 7. WiGLE.net — BSSID to Physical Location
+### 8. WiGLE.net — BSSID to Physical Location
 
 Plugging that BSSID into WiGLE's map search pulls up the record for that exact access point from wardriving data.
 
@@ -124,7 +137,7 @@ This confirms:
 
 **Why this works:** WiGLE doesn't care about privacy settings or account permissions — it's a public record built entirely from third-party wardriving scans. If your router's BSSID was ever within range of someone running a WiFi scanner (which, in dense cities, is almost guaranteed), it's in the database.
 
-### 8. Google Search Again — The Password Hint
+### 9. Google Search Again — The Password Hint
 
 A follow-up search for just `OWoodflint` surfaces the WordPress blog snippet again, but this time Google's preview text reveals a second string sitting in the post that wasn't visible on the rendered page earlier:
 
@@ -132,7 +145,7 @@ A follow-up search for just `OWoodflint` surfaces the WordPress blog snippet aga
 
 Google indexes the raw HTML of a page — including text hidden from human eyes via CSS. So even though the string doesn't show up when you *view* the blog post normally, it shows up in the search snippet because Google crawled the underlying source.
 
-### 9. View-Source — Confirming the Hidden Password
+### 10. View-Source — Confirming the Hidden Password
 
 To confirm it directly at the source rather than trust a search snippet, pulling up `view-source:` on the blog post shows the actual HTML:
 
@@ -144,7 +157,7 @@ To confirm it directly at the source rather than trust a search snippet, pulling
 
 White text (`color:#ffffff`) on a white page background — invisible to a normal reader, but sitting in plain text in the DOM. This answers *"What is the person's password?" → **pennYDr0pper.!***
 
-### 10. Final Confirmation
+### 11. Final Confirmation
 
 All seven answers checked out:
 
@@ -152,6 +165,7 @@ All seven answers checked out:
 
 | Question | Answer |
 |---|---|
+| GPS coordinates (EXIF, not a graded question but the key that opened the room) | 54°17'41.27"N, 2°15'1.33"W |
 | Avatar subject | cat |
 | City | London |
 | WAP SSID | UnileverWiFi |
@@ -162,22 +176,24 @@ All seven answers checked out:
 
 ## Full Lessons Learned
 
-This room is less about any single "trick" and more about **discipline in pivoting**: every finding is only useful if you immediately ask "what does this let me search next?" A profile picture led to a username, the username led to a blog and a repo, the repo leaked a city and an email, and a careless tweet leaked a hardware identifier that WiGLE turned into a physical location — none of which required breaking into anything.
+This room is less about any single "trick" and more about **discipline in pivoting**: every finding is only useful if you immediately ask "what does this let me search next?" A JPEG's EXIF metadata leaked both a GPS location and a self-tagged username, that username led to a blog and a repo, the repo leaked a city and an email, and a careless tweet leaked a hardware identifier that WiGLE turned into a physical location — none of which required breaking into anything.
 
-The two techniques worth internalizing for future OSINT work or recon phases of a pentest:
+Three techniques worth internalizing for future OSINT work or recon phases of a pentest:
 
-1. **BSSIDs are geolocation leaks.** Unlike an SSID, a BSSID (MAC address) is tied to physical hardware and gets logged passively by wardriving databases like WiGLE regardless of the owner's privacy settings. Never publish one attached to your identity.
-2. **"Hidden" isn't hidden from crawlers.** CSS-based hiding (`color` matching background, `display:none`, etc.) only hides content from a human glancing at the rendered page. Search engine crawlers and `view-source` both see the raw HTML. If something shouldn't be public, it needs to not be in the document at all — not just styled invisible.
+1. **Always check metadata first.** Before reverse image search, before manual digging — pull the EXIF/XMP headers with `exiftool` or a web parser. It's the cheapest possible move and, as this room proves, it can hand you the entire pivot chain's starting point in one step (here, a `copyright` field that was literally the target's username).
+2. **BSSIDs are geolocation leaks.** Unlike an SSID, a BSSID (MAC address) is tied to physical hardware and gets logged passively by wardriving databases like WiGLE regardless of the owner's privacy settings. Never publish one attached to your identity.
+3. **"Hidden" isn't hidden from crawlers.** CSS-based hiding (`color` matching background, `display:none`, etc.) only hides content from a human glancing at the rendered page. Search engine crawlers and `view-source` both see the raw HTML. If something shouldn't be public, it needs to not be in the document at all — not just styled invisible.
 
 More generally: this is the same methodology used in real recon/OSINT-gathering phases of a pentest engagement (building a target profile before ever touching the in-scope systems) — just compressed into a CTF-sized puzzle.
 
 ## Skills Demonstrated
 
-`OSINT Methodology` `Reverse Image Search` `Google Dorking` `WiGLE.net / Wardriving Data` `HTML Source Inspection` `Cross-Platform Identity Correlation` `Digital Footprint Analysis`
+`OSINT Methodology` `EXIF/Metadata Analysis` `Google Dorking` `WiGLE.net / Wardriving Data` `HTML Source Inspection` `Cross-Platform Identity Correlation` `Digital Footprint Analysis`
 
 ## References
 
 - [TryHackMe — OhSINT](https://tryhackme.com/room/ohsint)
+- [ExifTool by Phil Harvey](https://exiftool.org/) — the standard CLI tool for reading/writing image metadata
+- [metadata2go.com](https://www.metadata2go.com/) — web-based EXIF/metadata viewer, no install required
 - [WiGLE.net](https://wigle.net/) — wardriving/wireless network database
 - [Google Advanced Search Operators — Google Support](https://support.google.com/websearch/answer/2466433)
-- [TinEye — Reverse Image Search](https://tineye.com/)
