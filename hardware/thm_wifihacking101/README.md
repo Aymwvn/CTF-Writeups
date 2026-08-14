@@ -265,3 +265,5 @@ Only 123,104 keys in (0.86% through the full wordlist) — the password was near
 - [Hashcat — official documentation](https://hashcat.net/hashcat/)
 - [hcxtools / hcxdumptool — PMKID attack tooling](https://github.com/ZerBea/hcxtools)
 - [wifiphisher — Evil Twin automation](https://github.com/wifiphisher/wifiphisher)
+
+- Author: Aymane Boualam
