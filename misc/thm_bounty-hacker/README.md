@@ -143,7 +143,7 @@ hydra -l lin -P locks.txt 10.128.137.193 -t 4 ssh
 **A: SSH**
 
 **Q: What is the user's password?**
-**A: Not captured** — the value is redacted in my own screenshot (blue box) and wasn't otherwise recorded during the session, so I'm not guessing it here.
+**A: Brute Force it**
 
 **Logging in:**
 ```bash
