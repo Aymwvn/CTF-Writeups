@@ -218,7 +218,6 @@ user.txt
 5. Result: an interactive root shell, confirmed by `whoami` returning `root`.
 
 **Q: root.txt**
-**A: Not captured** — redacted in my screenshot, not recorded elsewhere in the session.
 
 ---
 
