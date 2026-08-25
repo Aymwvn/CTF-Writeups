@@ -23,17 +23,17 @@ CTFs are how I sharpen offensive security skills outside of school and internshi
 
 | Category | Focus | Count |
 |---|---|---|
-| [Web](./web) | SQLi, XSS, SSRF, IDOR, auth bypass, deserialization | - |
-| [Crypto](./crypto) | Classical ciphers, RSA attacks, hash length extension | - |
-| [Reverse Engineering](./reverse-engineering) | Static/dynamic analysis, disassembly, unpacking | - |
-| [Pwn](./pwn) | Buffer overflows, ROP chains, format strings | - |
-| [Network](./network) | Packet analysis, protocol abuse, traffic reconstruction | - |
-| [OSINT](./osint) | Metadata, geolocation, social recon, image/EXIF analysis | - |
-| [Forensics / DFIR](./forensics-dfir) | Memory dumps, disk images, log analysis, timeline reconstruction | - |
-| [Steganography](./steganography) | Hidden data in images, audio, files | - |
-| [Misc](./misc) | Anything that doesn't fit elsewhere — logic puzzles, esoteric formats | - |
-| [AI](./ai) | Prompt injection, model extraction, adversarial challenges | - |
-| [Hardware](./hardware) | Firmware analysis, embedded systems, side-channel basics | - |
+| [Web](./web) | SQLi, XSS, SSRF, IDOR, auth bypass, deserialization | 5 |
+| [Crypto](./crypto) | Classical ciphers, RSA attacks, hash length extension | 1 |
+| [Reverse Engineering](./reverse-engineering) | Static/dynamic analysis, disassembly, unpacking | 1 |
+| [Pwn](./pwn) | Buffer overflows, ROP chains, format strings | 1 |
+| [Network](./network) | Packet analysis, protocol abuse, traffic reconstruction | 2 |
+| [OSINT](./osint) | Metadata, geolocation, social recon, image/EXIF analysis | 1 |
+| [Forensics / DFIR](./forensics-dfir) | Memory dumps, disk images, log analysis, timeline reconstruction | 1 |
+| [Steganography](./steganography) | Hidden data in images, audio, files | 2 |
+| [Misc](./misc) | Anything that doesn't fit elsewhere — logic puzzles, esoteric formats | 5 |
+| [AI](./ai) | Prompt injection, model extraction, adversarial challenges | 1 |
+| [Hardware](./hardware) | Firmware analysis, embedded systems, side-channel basics | 2 |
 
 *(Count column updates as writeups get added — keep it honest, don't inflate.)*
 
