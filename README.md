@@ -35,8 +35,6 @@ CTFs are how I sharpen offensive security skills outside of school and internshi
 | [AI](./ai) | Prompt injection, model extraction, adversarial challenges | 1 |
 | [Hardware](./hardware) | Firmware analysis, embedded systems, side-channel basics | 2 |
 
-*(Count column updates as writeups get added — keep it honest, don't inflate.)*
-
 ---
 
 ## Methodology
