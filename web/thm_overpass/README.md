@@ -288,8 +288,6 @@ root
 
 `whoami` returned `root` — the `/etc/hosts` redirect plus the unauthenticated cron download chain gave full root access.
 
-**root flag:** Not captured — the session confirmed `root` access via `whoami`, but the `root.txt` contents weren't visible in the final screenshot.
-
 ---
 
 ## Full Lessons Learned
