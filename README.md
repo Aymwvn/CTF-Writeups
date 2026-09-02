@@ -23,7 +23,7 @@ CTFs are how I sharpen offensive security skills outside of school and internshi
 
 | Category | Focus | Count |
 |---|---|---|
-| [Web](./web) | SQLi, XSS, SSRF, IDOR, auth bypass, deserialization | 6 |
+| [Web](./web) | SQLi, XSS, SSRF, IDOR, auth bypass, deserialization | 7 |
 | [Crypto](./crypto) | Classical ciphers, RSA attacks, hash length extension | 1 |
 | [Reverse Engineering](./reverse-engineering) | Static/dynamic analysis, disassembly, unpacking | 1 |
 | [Pwn](./pwn) | Buffer overflows, ROP chains, format strings | 1 |
